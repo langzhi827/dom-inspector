@@ -22,7 +22,6 @@
             } else {
                 elem.attachEvent('on' + evt, fn);
             }
-            return elem;
         }
 
         /*
@@ -30,6 +29,8 @@
          selector: 选择器
          excludeId: 过滤id为此值的dom元素
          */
+        var delegatedEvents = [];
+
         function addEventDelegate(elem, evt, fn, selector, except) {
             var handler = function (e) {
                 var target = e.target || window.event.srcElement,
@@ -39,17 +40,17 @@
                 if (except) {
                     var node = target;
                     var mark = except.substring(0, 1);
-                    except = except.substring(1);
+                    var except_copy = except.substring(1);
                     if (mark == '#') {
                         while (node !== document) {
-                            if (node.id == except) {
+                            if (node.id == except_copy) {
                                 return;
                             }
                             node = node.parentNode;
                         }
                     } else if (mark == '.') {
                         while (node !== document) {
-                            if (node.className.indexOf(except) !== -1) {
+                            if (node.className.indexOf(except_copy) !== -1) {
                                 return;
                             }
                             node = node.parentNode;
@@ -72,19 +73,35 @@
                     fn.call(this, e);
                 }
             }
-
+            delegatedEvents.push({
+                'handle': handler,
+                'elem': elem,
+                'fn': fn,
+                'evt': evt
+            });
             /*事件绑定*/
-            return addEvent(elem, evt, handler);
+            addEvent(elem, evt, handler);
         }
 
         /*移除事件*/
-        function removeEvent(elem, evt, fn) {
+        function removeEvent(elem, evt, fn, isDelegated) {
+            var stored = null;
+            if (isDelegated) {
+                for (var i = 0, len = delegatedEvents.length; i < len; ++i) {
+                    stored = delegatedEvents[i];
+                    if (stored.elem === elem && stored.evt === evt && stored.fn === fn) {
+                        fn = stored.handle; //-------------
+                        delegatedEvents.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+
             if (window.addEventListener) {
                 elem.removeEventListener(evt, fn, false);
             } else {
                 elem.detachEvent('on' + evt, fn);
             }
-            return elem;
         }
 
         /*停止事件传播，防止默认行为*/
@@ -538,7 +555,83 @@
                 u.addClass(target, 'dom-tree-toggle');
             }
         }
+        /*查找dom元素*/
+        var oldStyle = null;
+        var searchToggle = true;
 
+        function searchDom(e) {
+            var target = e.target || window.event.srcElement;
+            if (target.className.indexOf('dom-search') !== -1) {
+                if (searchToggle) {
+
+                    searchToggle = false;
+                    u.addEventDelegate(document.body, 'mouseover', searchDom, '*', '.dom-container');
+                    u.addEventDelegate(document.body, 'mouseout', searchDom, '*', '.dom-container');
+                    u.addEventDelegate(document.body, 'click', searchDom, '*', '.dom-container');
+
+                    u.addClass(target, 'dom-search-toggle');
+
+                } else {
+                    searchToggle = true;
+                    u.removeEvent(document.body, 'mouseover', searchDom, true);
+                    u.removeEvent(document.body, 'mouseout', searchDom, true);
+                    u.removeEvent(document.body, 'click', searchDom, true);
+
+                    u.removeClass(target, 'dom-search-toggle');
+                }
+            } else {
+                if (e.type == 'mouseover') {
+                    oldStyle = target.getAttribute('style') || '';
+                    target.setAttribute('style', 'outline: 1px dashed #000; ' + oldStyle);
+
+                } else if (e.type == 'mouseout') {
+                    if (oldStyle != '') {
+                        target.setAttribute('style', oldStyle);
+                    } else {
+                        target.removeAttribute('style');
+                    }
+                } else {
+                    searchToggle = true;
+
+                    u.removeEvent(document.body, 'mouseover', searchDom, true);
+                    u.removeEvent(document.body, 'mouseout', searchDom, true);
+                    u.removeEvent(document.body, 'click', searchDom, true);
+
+                    u.removeClass(target, 'dom-search-toggle');
+
+                    if (oldStyle != '') {
+                        target.setAttribute('style', oldStyle);
+                    } else {
+                        target.removeAttribute('style');
+                    }
+
+                    var path = getElemPath(target);
+                    var normal_nodes = treeBody.querySelectorAll('.dom-normal-node');
+                    var curr_node = null;
+                    for (var i = 0, len = normal_nodes.length; i < len; i++) {
+                        if (normal_nodes[i].getAttribute('data-js-path') == JSON.stringify(path.jsPath)) {
+                            curr_node = normal_nodes[i];
+                            break;
+                        }
+                    }
+
+                    if (curr_node) {
+                        curr_node.click();
+                    } else {
+                        return;
+                    }
+                    /*
+                        当前节点距离顶部位置大于等于容器高度，或者小于等于滚动条滚动的高度
+                    */
+                    if (curr_node.offsetTop >= treeBody.clientHeight || curr_node.offsetTop <= treeBody.scrollTop) {
+                        treeBody.scrollTop = curr_node.offsetTop - (Math.floor(treeBody.clientHeight / 2));
+                    }
+
+                    u.pauseEvent(e);
+                }
+            }
+
+        }
 
 
         function init() {
@@ -572,13 +665,18 @@
                 horizResizing = false;
                 document.documentElement.style.cursor = 'default';
             });
-
+            /*隐藏/显示dom树*/
             u.addEvent(swit, 'click', toggleDomTree);
+            /*查找dom元素*/
+            u.addEvent(search, 'click', searchDom);
 
         }
 
         init();
     }
 
-    DomInspector();
+    window.onload = function () {
+        DomInspector();
+    }
+
 })(window, document);
