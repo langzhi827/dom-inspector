@@ -50,7 +50,7 @@
                         }
                     } else if (mark == '.') {
                         while (node !== document) {
-                            if (node.className.indexOf(except_copy) !== -1) {
+                            if (node.className && node.className.indexOf(except_copy) !== -1) {
                                 return;
                             }
                             node = node.parentNode;
@@ -162,6 +162,36 @@
             return elem;
         }
 
+        /*监听dom树变化*/
+        function MutationDom(elem, callback) {
+            callback = typeof callback == 'function' ? callback : function () {
+            };
+
+            var timer = null;
+            // https://developer.mozilla.org/zh-CN/docs/Web/API/MutationObserver
+            var MutationObserver = window.MutationObserver || window.WebKitMutationObserver || window.MozMutationObserver;
+            if (MutationObserver) {
+                var observer = new MutationObserver(function (mutations) {
+                    clearTimeout(timer);
+                    timer = setTimeout(function () {
+                        callback(mutations);
+                    }, 500);
+                    /*mutations.forEach(function (mutation) {
+                     callback(mutation.target);
+                     });*/
+                });
+                var config = {subtree: true, childList: true, attributes: true, characterData: true};
+                observer.observe(elem, config);
+            } else {
+                addEvent(elem, 'DOMSubtreeModified', function (e) {
+                    clearTimeout(timer);
+                    timer = setTimeout(function () {
+                        callback([e.target]);
+                    }, 500);
+                });
+            }
+        }
+
         return {
             addEvent: addEvent,
             addEventDelegate: addEventDelegate,
@@ -169,25 +199,26 @@
             pauseEvent: pauseEvent,
             newElement: newElement,
             addClass: addClass,
-            removeClass: removeClass
+            removeClass: removeClass,
+            mutationDom: MutationDom
         }
     })();
 
     var DomInspector = function () {
         var Node = window.Node || {
-            ELEMENT_NODE: 1, //---
-            ATTRIBUTE_NODE: 2,
-            TEXT_NODE: 3, //---
-            CDATA_SECTION_NODE: 4,
-            ENTITY_REFERENCE_NODE: 5,
-            ENTITY_NODE: 6,
-            PROCESSING_INSTRUCTION_NODE: 7,
-            COMMENT_NODE: 8, //---
-            DOCUMENT_NODE: 9, //---
-            DOCUMENT_TYPE_NODE: 10,
-            DOCUMENT_FRAGMENT_NODE: 11,
-            NOTATION_NODE: 12
-        };
+                ELEMENT_NODE: 1, //---
+                ATTRIBUTE_NODE: 2,
+                TEXT_NODE: 3, //---
+                CDATA_SECTION_NODE: 4,
+                ENTITY_REFERENCE_NODE: 5,
+                ENTITY_NODE: 6,
+                PROCESSING_INSTRUCTION_NODE: 7,
+                COMMENT_NODE: 8, //---
+                DOCUMENT_NODE: 9, //---
+                DOCUMENT_TYPE_NODE: 10,
+                DOCUMENT_FRAGMENT_NODE: 11,
+                NOTATION_NODE: 12
+            };
         var options = {
             nodeTypes: [1, 3, 8], //1--ELEMENT_NODE, 3--TEXT_NODE, 8--COMMENT_NODE, 9--DOCUMENT_NODE
             height: 260,
@@ -372,6 +403,7 @@
             document.getElementsByTagName('body')[0].appendChild(container);
 
         }
+
         /*设置UI尺寸*/
         function setSize() {
 
@@ -465,6 +497,10 @@
 
             for (var i = 0, l = rootChilds.length; i < l; i++) {
                 var node = rootChilds[i];
+                // 过滤dom-container
+                if (node == container) {
+                    continue;
+                }
                 var withChildren = node.hasChildNodes();
                 if (options.nodeTypes.indexOf(node.nodeType) != -1) {
                     newNode = newTreeNode(node);
@@ -493,6 +529,7 @@
                 u.addClass(parent, 'dom-open');
             }
         }
+
         /*点击dom树节点*/
         function domClick(e) {
             var target = e.target || window.event.srcElement;
@@ -516,11 +553,13 @@
 
             drawCssPath(target);
         }
+
         /*渲染css路径*/
         function drawCssPath(elem) {
             var cssPaths = elem.getAttribute("data-css-path").split(" ").reverse().join("< ").slice(1);
             treeTitle.innerHTML = cssPaths;
         }
+
         /*拖动分割线*/
 
         var horizResizing = false;
@@ -542,6 +581,7 @@
                 setSize();
             }
         }
+
         /*隐藏/显示dom树*/
         function toggleDomTree(e) {
             var target = e.target || window.event.srcElement;
@@ -555,6 +595,7 @@
                 u.addClass(target, 'dom-tree-toggle');
             }
         }
+
         /*查找dom元素*/
         var oldStyle = null;
         var searchToggle = true;
@@ -621,8 +662,8 @@
                         return;
                     }
                     /*
-                        当前节点距离顶部位置大于等于容器高度，或者小于等于滚动条滚动的高度
-                    */
+                     当前节点距离顶部位置大于等于容器高度，或者小于等于滚动条滚动的高度
+                     */
                     if (curr_node.offsetTop >= treeBody.clientHeight || curr_node.offsetTop <= treeBody.scrollTop) {
                         treeBody.scrollTop = curr_node.offsetTop - (Math.floor(treeBody.clientHeight / 2));
                     }
@@ -670,13 +711,44 @@
             /*查找dom元素*/
             u.addEvent(search, 'click', searchDom);
 
+            /* 监听dom变化，对应更新dom树 */
+            var timer = null;
+            util.addEventDelegate(document, 'DOMSubtreeModified', function (e) {
+                clearTimeout(timer);
+                timer = setTimeout(function () {
+                    if (searchToggle) {
+                        var path = getElemPath(e.target);
+                        var normal_nodes = treeBody.querySelectorAll('.dom-normal-node');
+
+                        var curr_node = null;
+                        for (var i = 0, len = normal_nodes.length; i < len; i++) {
+                            if (normal_nodes[i].getAttribute('data-js-path') == JSON.stringify(path.jsPath)) {
+                                curr_node = normal_nodes[i];
+                                break;
+                            }
+                        }
+
+                        if (curr_node) {
+                            var box = curr_node.parentNode.querySelector('ul');
+                            if (box) {
+                                box.innerHTML = '';
+                                drawDom(e.target, box);
+                            }
+                        } else {
+                            return;
+                        }
+                    }
+                }, 500);
+            }, '*', '.dom-container');
+
         }
 
         init();
-    }
+    };
 
     window.onload = function () {
         DomInspector();
     }
 
-})(window, document);
+})
+(window, document);
